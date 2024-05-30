@@ -46,39 +46,40 @@ class DetermineColor(Node):
         #TODO
         bgr_img = image
         hsv_img = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2HSV)
-        image = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(bgr_img, cv2.COLOR_BGR2GRAY)
+        image = cv2.GaussianBlur(gray, (5,5), 0)
 
-        ret, thresh = cv2.threshold(image, 20, 255, cv2.THRESH_BINARY)
+        ret, thresh = cv2.threshold(image, 50, 255, cv2.THRESH_BINARY)
         edges = cv2.Canny(thresh, 200, 250)
         contours,_ = cv2.findContours(edges, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
 
         largest_area = 0
         best_contour = None
         roi = None
-        epsilon_n = 0.03
-        found = False
-        skipLength = False
+
+        for contour in contours:
+            epsilon = 0.03*cv2.arcLength(contour,True)
+            approx = cv2.approxPolyDP(contour,epsilon,True)
+            area = cv2.contourArea(contour)
+            if len(approx) == 4 and area > 2000:
+                if area > largest_area:
+                    largest_area = area
+                    best_contour = approx
+
+        if best_contour is None:
+            thresh = cv2.adaptiveThreshold(image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV, 11, 2)
+            kernel = np.ones((3, 3), np.uint8)
+            thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE, kernel)
+            best_contour = None
+            contours,_ = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            valid_contours = [contour for contour in contours if cv2.contourArea(contour) > 2000]
+            if valid_contours:
+                best_contour = max(valid_contours, key=cv2.contourArea)
 	
-        while not found:
-        	for contour in contours:
-            		epsilon = epsilon_n*cv2.arcLength(contour,True)
-            		approx = cv2.approxPolyDP(contour,epsilon,True)
-            		area = cv2.contourArea(approx)
-            		if (len(approx) == 4 or skipLength) and cv.isContourConvex(approx):
-            			if (area > 2000 and area > largest_area):
-            				found = True
-            				best_contour = approx
-            				largest_area = area
-            	
-        	epsilon += 0.01
-        	if (epsilon > 0.2):
-            		skipLength = True
-            		epsilon = 0.03
-            				
+
+        
         mask = np.zeros(hsv_img.shape[:2], dtype=np.uint8)
-        cv2.fillPoly(mask, [best_contour], 1)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2,2))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_ERODE, kernel)
+        cv2.drawContours(mask, [best_contour], 0, 255, -1)
         roi = cv2.bitwise_and(hsv_img, hsv_img, mask=mask)
         
         
@@ -108,4 +109,3 @@ if __name__ == '__main__':
     rclpy.spin(detector)
     detector.destroy_node()
     rclpy.shutdown()
-    cv2.destroyAllWindows()
